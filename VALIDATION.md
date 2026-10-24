@@ -46,11 +46,11 @@ After approval, manually verify:
 6. Choose unused shortcuts, enable, capture/pin from another app; verify conflict messaging. Global shortcut registration/invocation against other running applications is not yet verified.
 7. Gatekeeper distribution flow for the unsigned-by-Developer-ID, unnotarized download; no security policies should be disabled.
 
-Apple Silicon execution, macOS 13 execution, real physical multi-display capture and real permission prompt behavior remain unverified even when Universal compilation succeeds. Screenshots of the user's environment must never be committed to the repository.
+Physical Apple Silicon capture, macOS 13 execution, real physical multi-display capture and real permission prompt behavior remain unverified. Synthetic runtime tests on the CI Apple Silicon runner are separately recorded below. Screenshots of the user's environment must never be committed to the repository.
 
 ## Executed package verification
 
-- Final local run: 10 tests, 0 failures (2026-10-24 13:11 UTC).
+- Final local run: 10 tests, 0 failures (2026-10-24 05:11 UTC).
 - Actual packaged app: `STILLPIN_SMOKE_PASS menu settings editor`.
 - `lipo -archs`: `x86_64 arm64`; `-verify_arch arm64 x86_64` succeeded.
 - Mach-O `LC_BUILD_VERSION`: minimum macOS 13.0.
@@ -64,3 +64,12 @@ An explicit `--verify-capture` developer mode is available and is never run in C
 Executed locally via LaunchServices after user authorization: `STILLPIN_CAPTURE_PENDING`. Stillpin has not received the actual macOS grant, so no real screen was captured. The native UI automation surface is unavailable in this environment; the user must click Request Screen Recording in Stillpin and approve only Stillpin in System Settings. This is pending manual UI action, not an automatic approval denial. Do not give Terminal, Codex or any other application Screen Recording as a workaround.
 
 Initial commit `1f5c127dc940ae2d12d72fbf9562f16c01bc5791` passed CI run [40065345784](https://github.com/xdlkc/stillpin/actions/runs/40065345784). The follow-up verifier commit must have its own successful CI run; no older run is evidence for a newer commit.
+
+
+## Verified implementation CI and downloaded packages
+
+Implementation commit `adc758fa86fcfd904db26ffcda04b293ebb68fae` passed [run 40065731942](https://github.com/xdlkc/stillpin/actions/runs/40065731942). The runner image was `macos-15-arm64`: 10 synthetic tests passed with no failures, then the actual app printed `STILLPIN_SMOKE_PASS menu settings editor`. This adds Apple Silicon synthetic runtime evidence to the local Intel runtime checks; it does not demonstrate physical Apple Silicon capture.
+
+The exact run's Universal ZIP/DMG artifacts were downloaded into the ignored build directory. Both SHA-256 checksums matched the run's manifest. The ZIP's extracted app passed strict signature verification and `lipo -verify_arch arm64 x86_64`, and identified as `app.xdlkc.stillpin` with an ad-hoc signature and no TeamIdentifier. A documentation-only follow-up commit records this evidence; its own CI result is reported with delivery.
+
+The permission blocker is specifically unavailable native macOS UI control in the active tooling. No password or Touch ID was requested, and the System Settings list could not be inspected. The user has already authorized granting Stillpin access; that consent must still be applied in normal macOS UI. Minimum action: Stillpin menu bar → Settings & Permissions… → Request Screen Recording, then approve only Stillpin in the system prompt/settings. No repeated consent request is needed. Current app bundle is `/Users/lkc/Documents/Codex/2026-10-24/task-3/dist/Stillpin.app`.
