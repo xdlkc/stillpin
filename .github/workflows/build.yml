@@ -1,0 +1,26 @@
+name: Verify and package
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit and synthetic integration tests
+        run: scripts/test.sh
+      - name: Build universal ad-hoc app and ZIP
+        run: scripts/build.sh
+      - name: Native app smoke test (synthetic image only)
+        run: |
+          dist/Stillpin.app/Contents/MacOS/Stillpin --smoke-test | tee smoke.log
+          grep -q STILLPIN_SMOKE_PASS smoke.log
+      - name: Create DMG
+        run: scripts/dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Stillpin-universal-${{ github.sha }}
+          path: |
+            dist/Stillpin-universal.zip
+            dist/Stillpin-universal.dmg
+            dist/SHA256SUMS.txt
