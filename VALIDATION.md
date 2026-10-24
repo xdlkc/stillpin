@@ -56,3 +56,11 @@ Apple Silicon execution, macOS 13 execution, real physical multi-display capture
 - Mach-O `LC_BUILD_VERSION`: minimum macOS 13.0.
 - `codesign --verify --strict`: passed. Signature reports `adhoc`, identifier `app.xdlkc.stillpin`, no TeamIdentifier. No notarization performed.
 - Universal ZIP and DMG generated successfully; archive checksums are next to the outputs in `dist/SHA256SUMS.txt`. Outputs are deliberately excluded from git and are also produced as CI artifacts.
+
+## Permission-gated real-capture verifier
+
+An explicit `--verify-capture` developer mode is available and is never run in CI. Launch it through LaunchServices as documented in README so TCC identifies Stillpin, not a shell host. It checks existing approval before any capture; if approved, it covers one display with an opaque white synthetic window and requires every captured crop pixel to be white before saving any PNG. It then verifies local region capture, flattened cover, isolated clipboard round trip, PNG write/read, pins, opacity, visibility and Escape cleanup. It cannot test physical mixed-DPI layouts or manual pointer interaction by itself.
+
+Executed locally via LaunchServices after user authorization: `STILLPIN_CAPTURE_PENDING`. Stillpin has not received the actual macOS grant, so no real screen was captured. The native UI automation surface is unavailable in this environment; the user must click Request Screen Recording in Stillpin and approve only Stillpin in System Settings. This is pending manual UI action, not an automatic approval denial. Do not give Terminal, Codex or any other application Screen Recording as a workaround.
+
+Initial commit `1f5c127dc940ae2d12d72fbf9562f16c01bc5791` passed CI run [40065345784](https://github.com/xdlkc/stillpin/actions/runs/40065345784). The follow-up verifier commit must have its own successful CI run; no older run is evidence for a newer commit.

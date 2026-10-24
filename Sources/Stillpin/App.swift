@@ -103,7 +103,8 @@ final class Hotkeys {
     }
     let d = UserDefaults.standard
     if !hotkeys.apply(
-      enabled: !CommandLine.arguments.contains("--smoke-test") && d.bool(forKey: "hotkeys"),
+      enabled: !CommandLine.arguments.contains("--smoke-test")
+        && !CommandLine.arguments.contains("--verify-capture") && d.bool(forKey: "hotkeys"),
       capture: d.integer(forKey: "captureKey"),
       pin: d.object(forKey: "pinKey") == nil ? 1 : d.integer(forKey: "pinKey"),
       modifiers: UInt32(d.integer(forKey: "modifiers")))
@@ -111,6 +112,10 @@ final class Hotkeys {
       Self.alert(
         "Shortcuts unavailable",
         "Another application may use these shortcuts. Choose different keys in Settings.")
+    }
+    if CommandLine.arguments.contains("--verify-capture") {
+      Task { await CaptureVerification.run(app: self) }
+      return
     }
     if CommandLine.arguments.contains("--smoke-test") {
       showSettings()
