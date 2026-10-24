@@ -73,3 +73,20 @@ Implementation commit `adc758fa86fcfd904db26ffcda04b293ebb68fae` passed [run 400
 The exact run's Universal ZIP/DMG artifacts were downloaded into the ignored build directory. Both SHA-256 checksums matched the run's manifest. The ZIP's extracted app passed strict signature verification and `lipo -verify_arch arm64 x86_64`, and identified as `app.xdlkc.stillpin` with an ad-hoc signature and no TeamIdentifier. A documentation-only follow-up commit records this evidence; its own CI result is reported with delivery.
 
 The permission blocker is specifically unavailable native macOS UI control in the active tooling. No password or Touch ID was requested, and the System Settings list could not be inspected. The user has already authorized granting Stillpin access; that consent must still be applied in normal macOS UI. Minimum action: Stillpin menu bar → Settings & Permissions… → Request Screen Recording, then approve only Stillpin in the system prompt/settings. No repeated consent request is needed. Current app bundle is `/Users/lkc/Documents/Codex/2026-10-24/task-3/dist/Stillpin.app`.
+
+## 0.1.1 shortcut correction (2026-10-24)
+
+Official source checks: Getting Started specifies global F1/F3/Shift+F3; Key Bindings maps Ctrl to Cmd on macOS; the Mac v2.4 Beta changelog specifically changes Redo to Cmd+Shift+Z. Stillpin follows that Mac-specific redo rule and never binds it to clear-all. README distinguishes global commands, editor commands, focused-pin commands and unsupported features.
+
+| Previous behavior | Corrected behavior |
+| --- | --- |
+| Untouched installation disabled shortcuts and suggested modified S/P | F1 capture, F3 clipboard pin, Shift+F3 hide/show, enabled on untouched installations |
+| Shared modifier selector, no hide/show global key | Separate key/modifiers for all three actions |
+| Saved legacy values unversioned | Conservative one-time V2 migration; all explicit old settings, including disabled state and old suggested tuples, retained |
+| No editor copy/save/pin keyboard routing or redo | Cmd+C/S/T, Enter copy/close, Esc cancel, T selects Text, Cmd+Z undo and Cmd+Shift+Z redo |
+| Pin close only via UI | Cmd+W or Esc closes the focused pin |
+| Registration failure disabled saved preference | System symbolic reservation check plus exclusive Carbon registration; all-or-nothing rollback; saved assignment retained with explicit inactive status |
+
+18 synthetic regression tests passed locally. Coverage includes bare-function-key binding parameters and action IDs, exact legacy index migration, explicit-disable preservation, migration idempotence, system/app conflict simulation and rollback, actual editor key handlers using an isolated pasteboard, Cmd+T pin dispatch, Undo/Redo pixels/state and new-edit redo invalidation. No tests read or replace the real clipboard.
+
+The actual packaged app was launched through LaunchServices in registration-only mode and returned `STILLPIN_HOTKEY_REGISTRATION_PASS: F1, F3, Shift+F3`. This used real exclusive Carbon registration after checking current system reservations, then immediately unregistered. Dispatch was disabled: no actual key presses, screen capture or clipboard commands occurred. Native smoke also returned `STILLPIN_SMOKE_PASS menu settings editor`. Universal ZIP/DMG regenerated with ad-hoc signing. Physical Fn/key presses and real capture remain unverified; the previous manual Screen Recording handoff is unchanged.

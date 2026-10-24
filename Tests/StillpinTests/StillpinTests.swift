@@ -121,12 +121,6 @@ final class StillpinTests: XCTestCase {
     XCTAssertTrue(closed)
     editor.close()
   }
-  func testHotkeysRejectDuplicateAndDisableCleanly() {
-    let hotkeys = Hotkeys()
-    XCTAssertFalse(hotkeys.apply(enabled: true, capture: 0, pin: 0, modifiers: UInt32(cmdKey)))
-    XCTAssertTrue(hotkeys.refs.isEmpty)
-    XCTAssertTrue(hotkeys.apply(enabled: false, capture: 0, pin: 1, modifiers: 0))
-  }
   @MainActor func testSettingsAndGroupPinControls() throws {
     _ = NSApplication.shared
     NSApp.finishLaunching()

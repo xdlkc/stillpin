@@ -1,65 +1,17 @@
 import AppKit
 import Carbon
 
-final class Hotkeys {
-  var refs: [EventHotKeyRef] = []
-  var handler: EventHandlerRef?
-  var action: ((UInt32) -> Void)?
-  static let keys: [(String, UInt32)] = [
-    ("S", 1), ("P", 35), ("F6", 97), ("F7", 98), ("F8", 100), ("F9", 101), ("F10", 109),
-  ]
-  init() {
-    var type = EventTypeSpec(
-      eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-    InstallEventHandler(
-      GetApplicationEventTarget(),
-      { _, event, context in
-        guard let event, let context else { return OSStatus(eventNotHandledErr) }
-        var id = EventHotKeyID()
-        GetEventParameter(
-          event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
-          MemoryLayout<EventHotKeyID>.size, nil, &id)
-        Unmanaged<Hotkeys>.fromOpaque(context).takeUnretainedValue().action?(id.id)
-        return noErr
-      }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &handler)
-  }
-  func disable() {
-    refs.forEach { UnregisterEventHotKey($0) }
-    refs = []
-  }
-  func apply(enabled: Bool, capture: Int, pin: Int, modifiers: UInt32) -> Bool {
-    disable()
-    guard enabled else { return true }
-    guard Self.keys.indices.contains(capture), Self.keys.indices.contains(pin), capture != pin,
-      modifiers != 0
-    else { return false }
-    for (index, key) in [capture, pin].enumerated() {
-      var ref: EventHotKeyRef?
-      let status = RegisterEventHotKey(
-        Self.keys[key].1, modifiers, EventHotKeyID(signature: 0x5354_504E, id: UInt32(index + 1)),
-        GetApplicationEventTarget(), 0, &ref)
-      guard status == noErr, let ref else {
-        disable()
-        return false
-      }
-      refs.append(ref)
-    }
-    return true
-  }
-  deinit {
-    disable()
-    if let handler { RemoveEventHandler(handler) }
-  }
-}
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
   var status: NSStatusItem!
   let capture = CaptureCoordinator(), hotkeys = Hotkeys()
   var editors: [UUID: Editor] = [:], pins: [UUID: Pin] = [:]
   var settings: NSWindowController?
   var hidden = false
-  var captureKey = NSPopUpButton(), pinKey = NSPopUpButton()
+  var configuration = ShortcutConfiguration.defaults
+  var shortcutRows: [ShortcutRow] = []
+  var shortcutError: String?
+  var shortcutStatus = NSTextField(wrappingLabelWithString: "")
   var enabled = NSButton(checkboxWithTitle: "Enable global shortcuts", target: nil, action: nil)
-  var modifierButtons: [NSButton] = []
   var permissionLabel = NSTextField(labelWithString: "")
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -98,20 +50,40 @@ final class Hotkeys {
     NSApp.mainMenu = main
     hotkeys.action = { [weak self] id in
       DispatchQueue.main.async {
-        if id == 1 { self?.captureRegion() } else { self?.pinClipboard() }
+        switch id {
+        case 1: self?.captureRegion()
+        case 2: self?.pinClipboard()
+        case 3: self?.togglePins()
+        default: break
+        }
       }
     }
     let d = UserDefaults.standard
-    if !hotkeys.apply(
-      enabled: !CommandLine.arguments.contains("--smoke-test")
-        && !CommandLine.arguments.contains("--verify-capture") && d.bool(forKey: "hotkeys"),
-      capture: d.integer(forKey: "captureKey"),
-      pin: d.object(forKey: "pinKey") == nil ? 1 : d.integer(forKey: "pinKey"),
-      modifiers: UInt32(d.integer(forKey: "modifiers")))
-    {
-      Self.alert(
-        "Shortcuts unavailable",
-        "Another application may use these shortcuts. Choose different keys in Settings.")
+    let testing =
+      CommandLine.arguments.contains("--smoke-test")
+      || CommandLine.arguments.contains("--verify-capture")
+      || CommandLine.arguments.contains("--verify-hotkeys")
+    if !testing {
+      configuration = ShortcutPreferences.load(d)
+      shortcutError = hotkeys.apply(configuration)
+      if let shortcutError {
+        Self.alert(
+          "Shortcuts unavailable",
+          shortcutError
+            + "\nOpen Settings to choose unused keys or disable shortcuts. No other app was changed."
+        )
+      }
+    }
+    updateShortcutStatus()
+    if CommandLine.arguments.contains("--verify-hotkeys") {
+      hotkeys.action = nil  // Registration probe must never execute capture or clipboard actions.
+      let result = hotkeys.apply(.defaults)
+      print(
+        result.map { "STILLPIN_HOTKEY_REGISTRATION_CONFLICT: \($0)" }
+          ?? "STILLPIN_HOTKEY_REGISTRATION_PASS: F1, F3, Shift+F3")
+      hotkeys.disable()
+      NSApp.terminate(nil)
+      return
     }
     if CommandLine.arguments.contains("--verify-capture") {
       Task { await CaptureVerification.run(app: self) }
@@ -229,7 +201,7 @@ final class Hotkeys {
       return
     }
     let w = NSWindow(
-      contentRect: CGRect(x: 0, y: 0, width: 650, height: 600), styleMask: [.titled, .closable],
+      contentRect: CGRect(x: 0, y: 0, width: 680, height: 690), styleMask: [.titled, .closable],
       backing: .buffered, defer: false)
     w.title = "Stillpin — Settings"
     w.isReleasedWhenClosed = false
@@ -259,40 +231,25 @@ final class Hotkeys {
       NSButton(title: "Open Privacy Settings", target: self, action: #selector(privacy)),
     ])
     stack.addArrangedSubview(row)
-    let d = UserDefaults.standard
-    enabled.state = d.bool(forKey: "hotkeys") ? .on : .off
+    enabled.state = configuration.enabled ? .on : .off
     stack.addArrangedSubview(enabled)
-    captureKey.addItems(withTitles: Hotkeys.keys.map { $0.0 })
-    pinKey.addItems(withTitles: Hotkeys.keys.map { $0.0 })
-    captureKey.selectItem(at: min(6, d.integer(forKey: "captureKey")))
-    pinKey.selectItem(
-      at: d.object(forKey: "pinKey") == nil ? 1 : min(6, d.integer(forKey: "pinKey")))
+    for (title, binding) in configuration.bindings {
+      let row = ShortcutRow(title: title)
+      row.set(binding)
+      shortcutRows.append(row)
+      stack.addArrangedSubview(row.view)
+    }
     stack.addArrangedSubview(
       NSStackView(views: [
-        NSTextField(labelWithString: "Capture"), captureKey,
-        NSTextField(labelWithString: "Pin clipboard"), pinKey,
+        NSButton(title: "Apply Shortcuts", target: self, action: #selector(applyShortcuts)),
+        NSButton(
+          title: "Restore Snipaste Defaults", target: self, action: #selector(restoreShortcuts)),
       ]))
-    let mods = NSStackView()
-    let stored =
-      d.object(forKey: "modifiers") == nil
-      ? UInt32(cmdKey | optionKey | controlKey) : UInt32(d.integer(forKey: "modifiers"))
-    for (label, value) in [
-      ("⌘ Command", cmdKey), ("⌥ Option", optionKey), ("⌃ Control", controlKey),
-      ("⇧ Shift", shiftKey),
-    ] {
-      let b = NSButton(checkboxWithTitle: label, target: nil, action: nil)
-      b.tag = value
-      b.state = (stored & UInt32(value)) != 0 ? .on : .off
-      modifierButtons.append(b)
-      mods.addArrangedSubview(b)
-    }
-    stack.addArrangedSubview(mods)
-    stack.addArrangedSubview(
-      NSButton(title: "Apply Shortcuts", target: self, action: #selector(applyShortcuts)))
+    stack.addArrangedSubview(shortcutStatus)
     stack.addArrangedSubview(
       NSTextField(
         wrappingLabelWithString:
-          "Shortcuts start disabled. Capture: drag a region, Esc cancels. Editor: choose a tool then drag; Text prompts for text; ⌘Z undoes. Pins: drag title bar, resize edges, right-click for opacity or close. Ad-hoc signed; not notarized."
+          "Defaults: F1 capture, F3 pin clipboard, ⇧F3 hide/show pins. Mac media keys may require Fn; Stillpin never changes system settings. Editor: ⌘C copy, ⌘S save, ⌘T pin, ⌘Z undo, ⌘⇧Z redo, Enter copy and close, T text. Pins: Esc or ⌘W closes. Ad-hoc signed; not notarized."
       ))
     settings = NSWindowController(window: w)
     w.center()
@@ -312,26 +269,38 @@ final class Hotkeys {
     NSWorkspace.shared.open(
       URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
   }
-  @objc func applyShortcuts() {
-    let mods = modifierButtons.filter { $0.state == .on }.reduce(UInt32(0)) { $0 | UInt32($1.tag) }
-    let on = enabled.state == .on
-    guard
-      hotkeys.apply(
-        enabled: on, capture: captureKey.indexOfSelectedItem, pin: pinKey.indexOfSelectedItem,
-        modifiers: mods)
-    else {
-      UserDefaults.standard.set(false, forKey: "hotkeys")
-      enabled.state = .off
-      Self.alert(
-        "Shortcuts not registered",
-        "Choose distinct keys with at least one modifier. A system or application shortcut may already own that combination. Stillpin shortcuts are now disabled."
-      )
-      return
+  func updateShortcutStatus() {
+    shortcutStatus.stringValue =
+      shortcutError.map { "Inactive: " + $0 }
+      ?? (configuration.enabled
+        ? "Global shortcuts enabled: "
+          + configuration.bindings.map { $0.1.label }.joined(separator: " / ")
+        : "Global shortcuts disabled")
+    for menu in [status?.menu, NSApp.mainMenu?.items.first?.submenu].compactMap({ $0 }) {
+      for (index, actionIndex) in [(0, 0), (1, 1), (4, 2)] where menu.items.indices.contains(index)
+      {
+        let titles = ["Capture Region…", "Pin Clipboard Image", "Hide / Show All Pins"]
+        let suffix =
+          configuration.enabled && shortcutError == nil
+          ? configuration.bindings[actionIndex].1.label : "inactive"
+        menu.items[index].title = titles[actionIndex] + "  [" + suffix + "]"
+      }
     }
-    let d = UserDefaults.standard
-    d.set(on, forKey: "hotkeys")
-    d.set(captureKey.indexOfSelectedItem, forKey: "captureKey")
-    d.set(pinKey.indexOfSelectedItem, forKey: "pinKey")
-    d.set(Int(mods), forKey: "modifiers")
+  }
+  @objc func restoreShortcuts() {
+    configuration = .defaults
+    enabled.state = .on
+    for (row, binding) in zip(shortcutRows, configuration.bindings) { row.set(binding.1) }
+    applyShortcuts()
+  }
+  @objc func applyShortcuts() {
+    guard shortcutRows.count == 3 else { return }
+    configuration = ShortcutConfiguration(
+      enabled: enabled.state == .on, capture: shortcutRows[0].value, pin: shortcutRows[1].value,
+      toggle: shortcutRows[2].value)
+    ShortcutPreferences.save(configuration, to: .standard)
+    shortcutError = hotkeys.apply(configuration)
+    updateShortcutStatus()
+    if let shortcutError { Self.alert("Shortcuts not registered", shortcutError) }
   }
 }

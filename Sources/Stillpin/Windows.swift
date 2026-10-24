@@ -1,16 +1,54 @@
 import AppKit
 
+enum EditorCommand: Equatable {
+  case copy, save, pin, undo, redo, copyAndClose, cancel, text
+  static func resolve(_ event: NSEvent) -> Self? {
+    let mods = event.modifierFlags.intersection([.command, .shift, .control, .option])
+    let text = event.charactersIgnoringModifiers?.lowercased()
+    if mods == .command {
+      switch text {
+      case "c": return .copy
+      case "s": return .save
+      case "t": return .pin
+      case "z": return .undo
+      default: return nil
+      }
+    }
+    if mods == [.command, .shift], text == "z" { return .redo }
+    if mods.isEmpty {
+      if event.keyCode == 36 || event.keyCode == 76 { return .copyAndClose }
+      if event.keyCode == 53
+        && event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
+      {
+        return .cancel
+      }
+      if text == "t" { return .text }
+    }
+    return nil
+  }
+}
+final class EditorWindow: NSWindow {
+  var command: ((NSEvent) -> Bool)?
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if !(firstResponder is NSText), command?(event) == true { return true }
+    return super.performKeyEquivalent(with: event)
+  }
+}
 @MainActor final class Editor: NSWindowController, NSWindowDelegate {
   let canvas: Canvas
+  var copyPasteboard: NSPasteboard = .general
+  var toolPicker: NSSegmentedControl?
   var closed: (() -> Void)?
   init(image: CGImage) {
     canvas = Canvas(image: image)
-    let w = NSWindow(
+    let w = EditorWindow(
       contentRect: CGRect(x: 0, y: 0, width: 920, height: 650),
       styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false
     )
     super.init(window: w)
-    w.minSize = CGSize(width: 760, height: 360)
+    w.command = { [weak self] in self?.handle($0) ?? false }
+    canvas.command = { [weak self] in self?.handle($0) ?? false }
+    w.minSize = CGSize(width: 820, height: 360)
     w.title = "Stillpin — Annotate"
     w.isReleasedWhenClosed = false
     w.delegate = self
@@ -25,9 +63,11 @@ import AppKit
       labels: Tool.allCases.map(\.rawValue), trackingMode: .selectOne, target: self,
       action: #selector(changeTool(_:)))
     tools.selectedSegment = 0
+    toolPicker = tools
     bar.addArrangedSubview(tools)
     for (title, action) in [
-      ("Undo", #selector(undoAction)), ("Copy", #selector(copyImage)),
+      ("Undo", #selector(undoAction)), ("Redo", #selector(redoAction)),
+      ("Copy", #selector(copyImage)),
       ("Save PNG…", #selector(saveImage)), ("Pin", #selector(pinImage)),
     ] { bar.addArrangedSubview(NSButton(title: title, target: self, action: action)) }
     let scroll = NSScrollView()
@@ -50,6 +90,7 @@ import AppKit
     ])
     w.center()
     w.layoutIfNeeded()
+    w.initialFirstResponder = canvas
     scroll.magnification = min(1, min(900 / CGFloat(image.width), 570 / CGFloat(image.height)))
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -57,7 +98,27 @@ import AppKit
     canvas.tool = Tool.allCases[sender.selectedSegment]
   }
   @objc func undoAction() { canvas.undoMark() }
-  @objc func copyImage() { copy(to: .general) }
+  @objc func redoAction() { canvas.redoMark() }
+  func handle(_ event: NSEvent) -> Bool {
+    guard let command = EditorCommand.resolve(event) else { return false }
+    switch command {
+    case .copy: copyImage()
+    case .save: saveImage()
+    case .pin: pinImage()
+    case .undo: undoAction()
+    case .redo: redoAction()
+    case .copyAndClose:
+      copyImage()
+      close()
+    case .cancel: close()
+    case .text:
+      canvas.tool = .text
+      toolPicker?.selectedSegment = Tool.allCases.firstIndex(of: .text) ?? 2
+    }
+    return true
+  }
+
+  @objc func copyImage() { copy(to: copyPasteboard) }
   func copy(to pasteboard: NSPasteboard) {
     guard let i = canvas.flattened(), let data = Raster.png(i) else { return }
     pasteboard.clearContents()
@@ -81,7 +142,27 @@ import AppKit
   }
   func windowWillClose(_ notification: Notification) { closed?() }
 }
-final class PinPanel: NSPanel { override var canBecomeKey: Bool { true } }
+final class PinPanel: NSPanel {
+  override var canBecomeKey: Bool { true }
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if event.modifierFlags.intersection([.command, .shift, .control, .option]) == .command,
+      event.charactersIgnoringModifiers?.lowercased() == "w"
+    {
+      performClose(nil)
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
+  }
+  override func keyDown(with event: NSEvent) {
+    if event.keyCode == 53
+      && event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
+    {
+      performClose(nil)
+    } else {
+      super.keyDown(with: event)
+    }
+  }
+}
 @MainActor final class Pin: NSWindowController, NSWindowDelegate {
   var closed: (() -> Void)?
   init(image: CGImage) {

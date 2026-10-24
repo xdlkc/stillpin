@@ -66,6 +66,8 @@ struct Mark {
 final class Canvas: NSView {
   let image: CGImage
   var marks: [Mark] = []
+  var redoMarks: [Mark] = []
+  var command: ((NSEvent) -> Bool)?
   var tool: Tool = .arrow
   var pending: Mark?
   var changed: (() -> Void)?
@@ -92,6 +94,7 @@ final class Canvas: NSView {
       a.addButton(withTitle: "Cancel")
       a.window.initialFirstResponder = f
       if a.runModal() == .alertFirstButtonReturn && !f.stringValue.isEmpty {
+        redoMarks.removeAll()
         marks.append(Mark(tool: .text, start: p, end: p, text: f.stringValue))
         changed?()
         needsDisplay = true
@@ -108,6 +111,7 @@ final class Canvas: NSView {
     if var m = pending {
       m.end = point(event)
       if hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 2 {
+        redoMarks.removeAll()
         marks.append(m)
         changed?()
       }
@@ -117,7 +121,14 @@ final class Canvas: NSView {
   }
   func undoMark() {
     if !marks.isEmpty {
-      marks.removeLast()
+      redoMarks.append(marks.removeLast())
+      changed?()
+      needsDisplay = true
+    }
+  }
+  func redoMark() {
+    if let mark = redoMarks.popLast() {
+      marks.append(mark)
       changed?()
       needsDisplay = true
     }
@@ -185,10 +196,7 @@ final class Canvas: NSView {
     return c.makeImage()
   }
   override func keyDown(with event: NSEvent) {
-    if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "z" {
-      undoMark()
-    } else {
-      super.keyDown(with: event)
-    }
+    if command?(event) == true { return }
+    super.keyDown(with: event)
   }
 }
