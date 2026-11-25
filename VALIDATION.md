@@ -72,7 +72,7 @@ Implementation commit `adc758fa86fcfd904db26ffcda04b293ebb68fae` passed [run 400
 
 The exact run's Universal ZIP/DMG artifacts were downloaded into the ignored build directory. Both SHA-256 checksums matched the run's manifest. The ZIP's extracted app passed strict signature verification and `lipo -verify_arch arm64 x86_64`, and identified as `app.xdlkc.stillpin` with an ad-hoc signature and no TeamIdentifier. A documentation-only follow-up commit records this evidence; its own CI result is reported with delivery.
 
-The permission blocker is specifically unavailable native macOS UI control in the active tooling. No password or Touch ID was requested, and the System Settings list could not be inspected. The user has already authorized granting Stillpin access; that consent must still be applied in normal macOS UI. Minimum action: Stillpin menu bar → Settings & Permissions… → Request Screen Recording, then approve only Stillpin in the system prompt/settings. No repeated consent request is needed. Current app bundle is `/Users/lkc/Documents/Codex/2026-10-24/task-3/dist/Stillpin.app`.
+The permission blocker is specifically unavailable native macOS UI control in the active tooling. No password or Touch ID was requested, and the System Settings list could not be inspected. The user has already authorized granting Stillpin access; that consent must still be applied in normal macOS UI. Minimum action: Stillpin menu bar → Settings & Permissions… → Request Screen Recording, then approve only Stillpin in the system prompt/settings. No repeated consent request is needed. Current app bundle is `<workspace>/dist/Stillpin.app`.
 
 ## 0.1.1 shortcut correction (2026-10-24)
 
